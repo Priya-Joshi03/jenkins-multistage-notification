@@ -6,6 +6,7 @@ pipeline {
         DEV_PORT   = "8081"
         PROD_PORT  = "8082"
         MAIL_TO    = "priyajoshi6721@gmail.com"
+        APPROVED_BY = "N/A"
     }
 
     stages {
@@ -19,9 +20,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh """
-                        docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} .
-                    """
+                    sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
                 }
             }
         }
@@ -80,12 +79,14 @@ URL: ${BUILD_URL}
 """
                     )
 
-                    input(
+                    def approver = input(
                         message: "Approve deployment to PROD?",
                         ok: "Approve",
-                        submitter: "manager",   // 🔐 ONLY MANAGER
+                        submitter: "manager",
                         submitterParameter: "APPROVED_BY"
                     )
+
+                    env.APPROVED_BY = approver
                 }
             }
         }
@@ -112,7 +113,7 @@ Deployment successful.
 
 Job: ${JOB_NAME}
 Build: ${BUILD_NUMBER}
-Approved by: ${APPROVED_BY}
+Approved by: ${env.APPROVED_BY}
 
 URL: ${BUILD_URL}
 """
