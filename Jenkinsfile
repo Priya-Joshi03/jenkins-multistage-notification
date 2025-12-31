@@ -5,13 +5,12 @@ pipeline {
         IMAGE_NAME = "cicd-website"
         DEV_PORT   = "8081"
         PROD_PORT  = "8082"
-
-        NOTIFY_EMAIL = "priyajoshi6721@gmail.com"
+        MAIL_TO    = "priyajoshi6721@gmail.com"
     }
 
     stages {
 
-        stage('Checkout Source Code') {
+        stage('Checkout Code') {
             steps {
                 checkout scm
             }
@@ -19,55 +18,48 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh 'docker build -t $IMAGE_NAME:$BUILD_NUMBER .'
+                script {
+                    sh """
+                        docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} .
+                    """
+                }
             }
         }
 
         stage('Deploy to DEV') {
             steps {
                 script {
-                    try {
-                        sh '''
+                    sh """
                         docker rm -f dev-site || true
-                        docker run -d --name dev-site -p $DEV_PORT:80 $IMAGE_NAME:$BUILD_NUMBER
-                        '''
-                    } catch (err) {
-                        emailext(
-                            subject: "❌ DEV DEPLOYMENT FAILED",
-                            body: """
-                            DEV deployment failed.
-
-                            Job: ${JOB_NAME}
-                            Build: ${BUILD_NUMBER}
-                            Stage: DEV
-                            """,
-                            to: "$NOTIFY_EMAIL"
-                        )
-                        error "DEV deployment failed"
-                    }
+                        docker run -d --name dev-site -p ${DEV_PORT}:80 ${IMAGE_NAME}:${BUILD_NUMBER}
+                    """
                 }
             }
         }
 
-        stage('Test Website') {
+        stage('Test in DEV') {
             steps {
                 script {
                     try {
-                        sh 'chmod +x test.sh'
-                        sh './test.sh'
+                        sh """
+                            echo "Testing DEV environment..."
+                            sleep 5
+                            curl -f http://localhost:${DEV_PORT}
+                        """
                     } catch (err) {
                         emailext(
-                            subject: "❌ TEST FAILED",
+                            to: "${MAIL_TO}",
+                            subject: "❌ DEV TEST FAILED | Build #${BUILD_NUMBER}",
                             body: """
-                            Automated tests failed.
+DEV testing failed.
 
-                            Job: ${JOB_NAME}
-                            Build: ${BUILD_NUMBER}
-                            Stage: TEST
-                            """,
-                            to: "$NOTIFY_EMAIL"
+Job: ${JOB_NAME}
+Build: ${BUILD_NUMBER}
+Stage: DEV TEST
+URL: ${BUILD_URL}
+"""
                         )
-                        error "Tests failed"
+                        error("DEV tests failed")
                     }
                 }
             }
@@ -75,45 +67,36 @@ pipeline {
 
         stage('Manual Approval for PROD') {
             steps {
-                emailext(
-                    subject: "⏸ APPROVAL REQUIRED FOR PROD",
-                    body: """
-                    Pipeline is waiting for PROD approval.
+                script {
+                    emailext(
+                        to: "${MAIL_TO}",
+                        subject: "⏸ PROD Approval Required | Build #${BUILD_NUMBER}",
+                        body: """
+Approval needed for PROD deployment.
 
-                    Job: ${JOB_NAME}
-                    Build: ${BUILD_NUMBER}
-                    Stage: APPROVAL
-                    """,
-                    to: "$NOTIFY_EMAIL"
-                )
+Job: ${JOB_NAME}
+Build: ${BUILD_NUMBER}
+URL: ${BUILD_URL}
+"""
+                    )
 
-                input message: 'Approve PROD website deployment?',
-                      ok: 'Approve'
+                    input(
+                        message: "Approve deployment to PROD?",
+                        ok: "Approve",
+                        submitter: "manager",   // 🔐 ONLY MANAGER
+                        submitterParameter: "APPROVED_BY"
+                    )
+                }
             }
         }
 
         stage('Deploy to PROD') {
             steps {
                 script {
-                    try {
-                        sh '''
+                    sh """
                         docker rm -f prod-site || true
-                        docker run -d --name prod-site -p $PROD_PORT:80 $IMAGE_NAME:$BUILD_NUMBER
-                        '''
-                    } catch (err) {
-                        emailext(
-                            subject: "❌ PROD DEPLOYMENT FAILED",
-                            body: """
-                            PROD deployment failed.
-
-                            Job: ${JOB_NAME}
-                            Build: ${BUILD_NUMBER}
-                            Stage: PROD
-                            """,
-                            to: "$NOTIFY_EMAIL"
-                        )
-                        error "PROD deployment failed"
-                    }
+                        docker run -d --name prod-site -p ${PROD_PORT}:80 ${IMAGE_NAME}:${BUILD_NUMBER}
+                    """
                 }
             }
         }
@@ -122,29 +105,31 @@ pipeline {
     post {
         success {
             emailext(
-                subject: "✅ PROD DEPLOYMENT SUCCESSFUL",
+                to: "${MAIL_TO}",
+                subject: "✅ PROD DEPLOYED SUCCESSFULLY | Build #${BUILD_NUMBER}",
                 body: """
-                Website deployed successfully to PROD.
+Deployment successful.
 
-                Job: ${JOB_NAME}
-                Build: ${BUILD_NUMBER}
-                PROD URL: http://localhost:${PROD_PORT}
-                """,
-                to: "$NOTIFY_EMAIL"
+Job: ${JOB_NAME}
+Build: ${BUILD_NUMBER}
+Approved by: ${APPROVED_BY}
+
+URL: ${BUILD_URL}
+"""
             )
         }
 
         failure {
             emailext(
-                subject: "❌ PIPELINE FAILED",
+                to: "${MAIL_TO}",
+                subject: "❌ PIPELINE FAILED | Build #${BUILD_NUMBER}",
                 body: """
-                Jenkins pipeline failed.
+Pipeline failed.
 
-                Job: ${JOB_NAME}
-                Build: ${BUILD_NUMBER}
-                Please check Jenkins logs.
-                """,
-                to: "$NOTIFY_EMAIL"
+Job: ${JOB_NAME}
+Build: ${BUILD_NUMBER}
+URL: ${BUILD_URL}
+"""
             )
         }
     }
